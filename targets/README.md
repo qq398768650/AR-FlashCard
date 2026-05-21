@@ -1,0 +1,1 @@
+请将您的目标图像放在此目录，并使用 MindAR Image Tool 生成 targets.mind 文件。
