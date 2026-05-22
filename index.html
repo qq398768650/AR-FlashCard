@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preload" href="./targets/targets.mind" as="fetch" crossorigin="anonymous" />
     <title>MindAR AR闪卡</title>
     <style>
       * {
@@ -89,7 +90,7 @@
     </div>
     
     <a-scene 
-      mindar-image="imageTargetSrc: ./targets/targets.mind; autoStart: false;" 
+      mindar-image="imageTargetSrc: ./targets/targets.mind; autoStart: false; uiLoading: no;" 
       color-space="sRGB" 
       renderer="colorManagement: true" 
       vr-mode-ui="enabled: false" 
@@ -175,6 +176,15 @@
     <script src="./js/mindar-image-aframe.prod.js"></script>
     
     <script>
+      const AR_TARGET_SRC = './targets/targets.mind';
+
+      // 提前把识别数据放进浏览器缓存，避免点“开始”后才下载 5MB+ 的 targets.mind。
+      if (window.fetch) {
+        fetch(AR_TARGET_SRC, { cache: 'force-cache' }).catch(function(err) {
+          console.log('AR识别数据预加载失败，将在启动时重试:', err);
+        });
+      }
+
     // ========== iOS微信摄像头黑屏修复补丁 ==========
     // 修复MindAR在iOS微信H5环境下摄像头黑屏问题
     (function() {
@@ -219,6 +229,8 @@
         const tip = document.getElementById('arStartTip');
         const info = document.getElementById('info');
         let arStarted = false;
+        let arReady = false;
+        let pendingStart = false;
 
         function startAR() {
           if (arStarted) {
@@ -235,13 +247,42 @@
           return true;
         }
 
+        function startWhenReady() {
+          pendingStart = true;
+          if (startAR()) {
+            pendingStart = false;
+            return;
+          }
+
+          sceneEl.addEventListener('renderstart', function() {
+            if (pendingStart && startAR()) {
+              pendingStart = false;
+            }
+          }, { once: true });
+        }
+
+        function showStartingUI(message) {
+          overlay.classList.add('active');
+          startBtn.disabled = true;
+          startBtn.textContent = '正在启动...';
+          tip.textContent = message;
+        }
+
         function resetStartUI(message) {
           arStarted = false;
+          arReady = false;
+          pendingStart = false;
           overlay.classList.add('active');
           startBtn.disabled = false;
           startBtn.textContent = '重新启动 AR';
           tip.textContent = message;
         }
+
+        sceneEl.addEventListener('arReady', function() {
+          arReady = true;
+          overlay.classList.remove('active');
+          info.textContent = '请扫描图像目标以查看AR效果';
+        });
 
         sceneEl.addEventListener('arError', function() {
           if (isAndroidWebView) {
@@ -257,6 +298,7 @@
           if (!startAR()) {
             sceneEl.addEventListener('renderstart', startAR, { once: true });
           }
+          info.textContent = '正在启动相机和识别数据...';
           return;
         }
 
@@ -271,16 +313,15 @@
             return;
           }
 
-          startBtn.disabled = true;
-          startBtn.textContent = '正在启动...';
-          tip.textContent = '请在系统弹窗中允许访问摄像头。';
+          showStartingUI('请在系统弹窗中允许访问摄像头。相机开启后会继续初始化识别数据，请稍候。');
 
           try {
-            if (!startAR()) {
-              throw new Error('MindAR system is not ready');
-            }
-            overlay.classList.remove('active');
-            info.textContent = '请扫描图像目标以查看AR效果';
+            startWhenReady();
+            setTimeout(function() {
+              if (!arReady) {
+                tip.textContent = '相机已请求启动，正在加载识别数据和追踪器...';
+              }
+            }, 900);
           } catch (err) {
             console.log('启动AR失败:', err);
             startBtn.disabled = false;
